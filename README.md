@@ -104,14 +104,5 @@ The implementation correctly handles FFTW scaling and window overlap normalizati
 - **C++**: FFTW3 library
 - **Python**: numpy, scipy, matplotlib
 
-## Performance
 
-The C++ implementation provides significant performance improvements over Python/scipy for large datasets while maintaining identical numerical accuracy.
 
-## License
-
-[Add your license information here]
-
-## Contributing
-
-[Add contribution guidelines here] 
