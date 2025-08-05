@@ -18,7 +18,7 @@ data = np.fromfile(input_file, dtype=np.float32).reshape(n_traces, n_samples)
 print(f"Loaded: {data.shape[0]} traces × {data.shape[1]} samples")
 
 # === STFT with padding ===
-# Для 2D входа с axis=-1, Scipy возвращает форму (n_traces, n_freqs, n_frames)
+# For 2D input with axis=-1, Scipy returns shape (n_traces, n_freqs, n_frames)
 f, t, Zxx = sps.stft(
     data,
     fs=1/dt,
@@ -31,7 +31,6 @@ f, t, Zxx = sps.stft(
     padded=True      
 )
 
-# --- ИСПРАВЛЕНО: Правильное описание осей ---
 print("\nTime axis (s):", np.round(t, 4))
 print("Frequency axis (Hz):", np.round(f, 2))
 print(f"STFT shape from Scipy: {Zxx.shape} (traces, freqs, frames)")
@@ -40,22 +39,19 @@ print(f"Number of frames: {Zxx.shape[2]}")
 
 
 # === Save STFT data to file ===
-# Zxx имеет форму (traces, freqs, frames) - нужно привести к формату C++ (traces, frames, freqs)
-# Исходные оси: 0=traces, 1=freqs, 2=frames
-# Целевые оси:   0=traces, 1=frames, 2=freqs
-# --- ИСПРАВЛЕНО: Правильное транспонирование ---
+# Zxx has shape (traces, freqs, frames) - need to convert to C++ format (traces, frames, freqs)
+# Original axes: 0=traces, 1=freqs, 2=frames
+# Target axes:   0=traces, 1=frames, 2=freqs
 stft_data = Zxx.transpose(0, 2, 1)
 
 print(f"\nTransposed STFT shape for saving: {stft_data.shape} (traces, frames, freqs)")
 
-# Запись данных в файл (этот блок уже был корректным)
+# Write data to file
 with open(stft_output_file, 'wb') as f:
     n_traces_out, n_frames_out, n_freqs_out = stft_data.shape
     f.write(np.array([n_traces_out, n_frames_out, n_freqs_out], dtype=np.int32).tobytes())
     
-    # Запись данных как чередующихся real/imaginary частей
-    # Этот способ записи корректен, но может быть медленным.
-    # Более быстрый способ - подготовить массив и записать одним вызовом:
+    # Write data as alternating real/imaginary parts
     interleaved_data = np.empty((stft_data.size, 2), dtype=np.float32)
     interleaved_data[:, 0] = stft_data.real.flatten()
     interleaved_data[:, 1] = stft_data.imag.flatten()
@@ -65,8 +61,7 @@ print(f"STFT data written to: {stft_output_file}")
 
 
 # === Inverse STFT ===
-# istft требует Zxx в его оригинальном формате (traces, freqs, frames)
-# --- ИСПРАВЛЕНО: Явное указание осей для надежности ---
+# istft requires Zxx in its original format (traces, freqs, frames)
 _, reconstructed = sps.istft(
     Zxx,
     fs=1/dt,
@@ -74,8 +69,8 @@ _, reconstructed = sps.istft(
     noverlap=frame_size - hop_size,
     window='hann',
     input_onesided=True,
-    time_axis=2,      # Указываем, что ось времени - последняя (индекс 2)
-    freq_axis=1       # Указываем, что ось частот - средняя (индекс 1)
+    time_axis=2,      # Time axis is last (index 2)
+    freq_axis=1       # Frequency axis is middle (index 1)
 )
 
 print("\nReconstructed shape before trim:", reconstructed.shape)

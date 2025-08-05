@@ -7,10 +7,10 @@
 #include <limits>
 #include <stdexcept>
 
-// Подключаем нашу новую header-only библиотеку
+// Include our new header-only library
 #include "stft.hpp"
 
-// ... (все функции для работы с файлами остаются без изменений) ...
+// File handling functions
 template<typename T>
 void read_binary_file(const std::string& filename, std::vector<std::vector<T>>& data, int n_rows, int n_cols) {
     std::ifstream in(filename, std::ios::binary);
@@ -62,7 +62,7 @@ void write_stft_binary_file(const std::string& filename, const std::vector<std::
 
 
 int main() {
-    // --- Параметры ---
+    // Parameters
     using RealType = float;
 
     const std::string input_file = "data/input.bin";
@@ -77,7 +77,7 @@ int main() {
 
     const BoundaryType boundary_type = BoundaryType::EVEN;
 
-    // --- Чтение данных ---
+    // Read data
     std::vector<std::vector<RealType>> seismogram;
     try {
         read_binary_file<RealType>(input_file, seismogram, n_traces, n_samples);
@@ -89,7 +89,7 @@ int main() {
     std::cout << "Read seismogram: " << seismogram.size() << " traces, " << seismogram[0].size() << " samples each\n";
     std::cout << "Using boundary type: " << (boundary_type == BoundaryType::ZERO ? "ZERO" : "EVEN") << "\n";
 
-    // --- Прямое STFT ---
+    // Forward STFT
     std::vector<std::vector<std::vector<std::complex<RealType>>>> stft_data(n_traces);
     for (int i = 0; i < n_traces; ++i) {
         stft_data[i] = STFT_forward<RealType>(seismogram[i], frame_size, hop_size, boundary_type);
@@ -98,18 +98,16 @@ int main() {
     write_stft_binary_file<RealType>(stft_output_file, stft_data);
     std::cout << "STFT data (raw) written to " << stft_output_file << "\n";
 
-    // --- Обратное STFT ---
+    // Inverse STFT
     std::vector<std::vector<RealType>> reconstructed(n_traces);
     for (int i = 0; i < n_traces; ++i) {
-        // ----- ИСПРАВЛЕНИЕ ЗДЕСЬ -----
-        // Добавлен пятый аргумент 'boundary_type'
         reconstructed[i] = STFT_inverse<RealType>(stft_data[i], frame_size, hop_size, n_samples, boundary_type);
     }
 
     write_binary_file<RealType>(output_file, reconstructed);
     std::cout << "Reconstructed seismogram written to " << output_file << "\n";
 
-    // --- Анализ качества ---
+    // Quality analysis
     std::cout << "\n=== ANALYSIS ===\n";
     double total_diff_sum = 0.0;
     double max_diff = 0.0;
