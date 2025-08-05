@@ -4,22 +4,19 @@
 #include <string>
 #include <complex>
 #include <cmath>
-#include <cassert>
+#include <limits>
+#include <stdexcept>
+
+// Подключаем нашу новую header-only библиотеку
 #include "stft.hpp"
 
-using namespace std;
-
-#include <fstream>
-#include <stdexcept>
-#include <vector>
-#include <string>
-
+// ... (все функции для работы с файлами остаются без изменений) ...
 template<typename T>
 void read_binary_file(const std::string& filename, std::vector<std::vector<T>>& data, int n_rows, int n_cols) {
     std::ifstream in(filename, std::ios::binary);
     if (!in) throw std::runtime_error("Failed to open input file: " + filename);
 
-    data.resize(n_rows, std::vector<T>(n_cols));
+    data.assign(n_rows, std::vector<T>(n_cols));
     for (int i = 0; i < n_rows; ++i) {
         in.read(reinterpret_cast<char*>(data[i].data()), n_cols * sizeof(T));
         if (!in) throw std::runtime_error("Error reading data at row " + std::to_string(i));
@@ -37,49 +34,103 @@ void write_binary_file(const std::string& filename, const std::vector<std::vecto
     }
 }
 
+template<typename T>
+void write_stft_binary_file(const std::string& filename, const std::vector<std::vector<std::vector<std::complex<T>>>>& stft_data) {
+    std::ofstream out(filename, std::ios::binary);
+    if (!out) throw std::runtime_error("Failed to open STFT output file: " + filename);
+
+    if (stft_data.empty() || stft_data[0].empty() || stft_data[0][0].empty()) {
+        std::cerr << "Warning: STFT data is empty, writing an empty file." << std::endl;
+        return;
+    }
+
+    int n_traces = stft_data.size();
+    int n_frames = stft_data[0].size();
+    int n_freqs = stft_data[0][0].size();
+
+    out.write(reinterpret_cast<const char*>(&n_traces), sizeof(int));
+    out.write(reinterpret_cast<const char*>(&n_frames), sizeof(int));
+    out.write(reinterpret_cast<const char*>(&n_freqs), sizeof(int));
+
+    for (int trace = 0; trace < n_traces; ++trace) {
+        for (int frame = 0; frame < n_frames; ++frame) {
+            out.write(reinterpret_cast<const char*>(stft_data[trace][frame].data()), n_freqs * sizeof(std::complex<T>));
+             if (!out) throw std::runtime_error("Error writing STFT data for trace " + std::to_string(trace));
+        }
+    }
+}
+
 
 int main() {
-    const string input_file = "data/input.bin";
-    const string output_file = "data/output_cpp.bin";
+    // --- Параметры ---
+    using RealType = float;
 
-    const int n_traces = 220;      // number of traces
-    const int n_samples = 501;   // number of samples per trace
+    const std::string input_file = "data/input.bin";
+    const std::string output_file = "data/output_cpp.bin";
+    const std::string stft_output_file = "data/stft_cpp.bin";
+
+    const int n_traces = 220;
+    const int n_samples = 501;
     const int frame_size = 64;
     const int hop_size = 32;
-    const double dt = 0.004;      // time step (in seconds)
+    const double dt = 0.004;
 
-    vector<vector<float>> seismogram;
-    read_binary_file<float>(input_file, seismogram, n_traces, n_samples);
+    const BoundaryType boundary_type = BoundaryType::EVEN;
 
-    cout << "Read seismogram: " << n_traces << " traces, " << n_samples << " samples each\n";
+    // --- Чтение данных ---
+    std::vector<std::vector<RealType>> seismogram;
+    try {
+        read_binary_file<RealType>(input_file, seismogram, n_traces, n_samples);
+    } catch (const std::runtime_error& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+        return 1;
+    }
 
-    // Transform each trace using STFT
-    vector<vector<vector<ComplexF>>> stft_data(n_traces);
-    for (int i = 0; i < n_traces; ++i)
-        stft_data[i] = STFT_forward_float(seismogram[i], frame_size, hop_size);
+    std::cout << "Read seismogram: " << seismogram.size() << " traces, " << seismogram[0].size() << " samples each\n";
+    std::cout << "Using boundary type: " << (boundary_type == BoundaryType::ZERO ? "ZERO" : "EVEN") << "\n";
 
-    // Output time and frequency lists
-    int n_frames = stft_data[0].size();
-    int n_freqs = frame_size / 2 + 1;
+    // --- Прямое STFT ---
+    std::vector<std::vector<std::vector<std::complex<RealType>>>> stft_data(n_traces);
+    for (int i = 0; i < n_traces; ++i) {
+        stft_data[i] = STFT_forward<RealType>(seismogram[i], frame_size, hop_size, boundary_type);
+    }
 
-    cout << "\nTime axis (s): ";
-    for (int t = 0; t < n_frames; ++t)
-        cout << t * hop_size * dt << " ";
-    cout << "\n";
+    write_stft_binary_file<RealType>(stft_output_file, stft_data);
+    std::cout << "STFT data (raw) written to " << stft_output_file << "\n";
 
-    cout << "Frequency axis (Hz): ";
-    for (int f = 0; f < n_freqs; ++f)
-        cout << f / (dt * frame_size) << " ";
-    cout << "\n";
+    // --- Обратное STFT ---
+    std::vector<std::vector<RealType>> reconstructed(n_traces);
+    for (int i = 0; i < n_traces; ++i) {
+        // ----- ИСПРАВЛЕНИЕ ЗДЕСЬ -----
+        // Добавлен пятый аргумент 'boundary_type'
+        reconstructed[i] = STFT_inverse<RealType>(stft_data[i], frame_size, hop_size, n_samples, boundary_type);
+    }
 
-    // Inverse STFT
-    vector<vector<float>> reconstructed(n_traces);
-    for (int i = 0; i < n_traces; ++i)
-        reconstructed[i] = STFT_inverse_float(stft_data[i], frame_size, hop_size, n_samples);
+    write_binary_file<RealType>(output_file, reconstructed);
+    std::cout << "Reconstructed seismogram written to " << output_file << "\n";
 
-    write_binary_file<float>(output_file, reconstructed);
-    cout << "Reconstructed seismogram written to " << output_file << "\n";
+    // --- Анализ качества ---
+    std::cout << "\n=== ANALYSIS ===\n";
+    double total_diff_sum = 0.0;
+    double max_diff = 0.0;
+    double total_squared_diff = 0.0;
+    
+    for (int trace = 0; trace < n_traces; ++trace) {
+        for (int sample = 0; sample < n_samples; ++sample) {
+            double diff = std::abs(static_cast<double>(seismogram[trace][sample]) - static_cast<double>(reconstructed[trace][sample]));
+            total_diff_sum += diff;
+            max_diff = std::max(max_diff, diff);
+            total_squared_diff += diff * diff;
+        }
+    }
+    
+    double mean_diff = total_diff_sum / (n_traces * n_samples);
+    double rms_diff = std::sqrt(total_squared_diff / (n_traces * n_samples));
+    
+    std::cout << "Reconstruction vs Original:\n";
+    std::cout << "  Max absolute difference: " << max_diff << "\n";
+    std::cout << "  Mean absolute difference: " << mean_diff << "\n";
+    std::cout << "  RMS difference: " << rms_diff << "\n";
 
     return 0;
 }
-

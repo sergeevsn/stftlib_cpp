@@ -1,207 +1,185 @@
+#include "stft.hpp" // Предполагается, что здесь BoundaryType и т.д.
 #include <cmath>
-#include <fftw3.h>
+#include <vector>
+#include <complex>
 #include <stdexcept>
-#include <stft.hpp>
+
+#include <type_traits>
+
+// Основной шаблон структуры (неопределенный)
+template<typename T>
+struct FFTW_Traits;
+
+// Специализация для double
+template<>
+struct FFTW_Traits<double> {
+    using real_type = double;
+    using complex_type = fftw_complex;
+    using plan_type = fftw_plan;
+
+    static real_type* alloc_real(size_t n) { return fftw_alloc_real(n); }
+    static complex_type* alloc_complex(size_t n) { return fftw_alloc_complex(n); }
+    static void free(void* p) { fftw_free(p); }
+    static void execute(plan_type p) { fftw_execute(p); }
+    static void destroy_plan(plan_type p) { fftw_destroy_plan(p); }
+
+    static plan_type plan_dft_r2c_1d(int n, real_type* in, complex_type* out, unsigned flags) {
+        return fftw_plan_dft_r2c_1d(n, in, out, flags);
+    }
+    static plan_type plan_dft_c2r_1d(int n, complex_type* in, real_type* out, unsigned flags) {
+        return fftw_plan_dft_c2r_1d(n, in, out, flags);
+    }
+};
+
+// Специализация для float
+template<>
+struct FFTW_Traits<float> {
+    using real_type = float;
+    using complex_type = fftwf_complex;
+    using plan_type = fftwf_plan;
+
+    static real_type* alloc_real(size_t n) { return fftwf_alloc_real(n); }
+    static complex_type* alloc_complex(size_t n) { return fftwf_alloc_complex(n); }
+    static void free(void* p) { fftwf_free(p); }
+    static void execute(plan_type p) { fftwf_execute(p); }
+    static void destroy_plan(plan_type p) { fftwf_destroy_plan(p); }
+
+    static plan_type plan_dft_r2c_1d(int n, real_type* in, complex_type* out, unsigned flags) {
+        return fftwf_plan_dft_r2c_1d(n, in, out, flags);
+    }
+    static plan_type plan_dft_c2r_1d(int n, complex_type* in, real_type* out, unsigned flags) {
+        return fftwf_plan_dft_c2r_1d(n, in, out, flags);
+    }
+};
 
 using std::vector;
 using std::complex;
 
-using Complex = std::complex<double>;
-
-// Generate Hann window function
-vector<double> hann_window(int N) {
-    vector<double> w(N);
+// Шаблонная функция для окна Ханна
+template<typename T>
+vector<T> hann_window(int N) {
+    vector<T> w(N);
     for (int i = 0; i < N; ++i) {
-        w[i] = 0.5 * (1 - cos(2 * M_PI * i / N));
+        // Используем std::cos, который перегружен для float и double
+        w[i] = static_cast<T>(0.5) * (static_cast<T>(1.0) - std::cos(static_cast<T>(2.0 * M_PI) * i / (N - 1)));
     }
     return w;
 }
 
-// STFT: analog of scipy.signal.stft (single channel)
-vector<vector<Complex>> STFT_forward(const vector<double>& signal, int frame_size, int hop_size) {
-    if (frame_size <= 0 || hop_size <= 0) throw std::invalid_argument("frame_size and hop_size must be > 0");
+// Шаблонная функция для расширения сигнала
+template<typename T>
+vector<T> apply_even_extension(const vector<T>& signal, int pad_size) {
+    if (pad_size < 1) return signal;
 
-    // Add padding as in scipy.signal.stft with boundary='zeros' and padded=True
-    // scipy adds padding to get an integer number of frames
-    int n_frames = 1 + (signal.size() - frame_size + hop_size - 1) / hop_size;
-    int padded_size = (n_frames - 1) * hop_size + frame_size;
-    vector<vector<Complex>> stft_result(n_frames, vector<Complex>(frame_size / 2 + 1));
+    int n = signal.size();
+    vector<T> extended(n + 2 * pad_size);
 
-    vector<double> window = hann_window(frame_size);
+    for (int i = 0; i < n; ++i) extended[pad_size + i] = signal[i];
+    for (int i = 0; i < pad_size; ++i) extended[i] = signal[pad_size - 1 - i];
+    for (int i = 0; i < pad_size; ++i) extended[n + pad_size + i] = signal[n - 1 - i];
+    
+    return extended;
+}
 
-    fftw_plan plan;
-    double* in = fftw_alloc_real(frame_size);
-    fftw_complex* out = fftw_alloc_complex(frame_size / 2 + 1);
-    plan = fftw_plan_dft_r2c_1d(frame_size, in, out, FFTW_MEASURE);
+// Шаблонная функция STFT_forward
+template<typename T>
+vector<vector<complex<T>>> STFT_forward(const vector<T>& signal, int frame_size, int hop_size, BoundaryType boundary) {
+    if (frame_size <= 0 || hop_size <= 0) throw std::invalid_argument("Invalid frame_size or hop_size");
+    
+    // Получаем типы и функции из нашей структуры Traits
+    using Traits = FFTW_Traits<T>;
+
+    vector<T> working_signal = signal;
+    if (boundary == BoundaryType::EVEN) {
+        int pad_size = frame_size / 2;
+        working_signal = apply_even_extension(signal, pad_size);
+    }
+
+    int n_frames = 1 + (working_signal.size() - frame_size + hop_size - 1) / hop_size;
+    
+    vector<vector<complex<T>>> stft_result(n_frames, vector<complex<T>>(frame_size / 2 + 1));
+    vector<T> window = hann_window<T>(frame_size);
+
+    typename Traits::real_type* in = Traits::alloc_real(frame_size);
+    typename Traits::complex_type* out = Traits::alloc_complex(frame_size / 2 + 1);
+    typename Traits::plan_type plan = Traits::plan_dft_r2c_1d(frame_size, in, out, FFTW_MEASURE);
 
     for (int f = 0; f < n_frames; ++f) {
         int offset = f * hop_size;
         for (int i = 0; i < frame_size; ++i) {
-            int signal_idx = offset + i;
-            if (signal_idx < signal.size()) {
-                in[i] = signal[signal_idx] * window[i];
-            } else {
-                in[i] = 0.0;  // zero-padding
-            }
+            int idx = offset + i;
+            in[i] = (idx < working_signal.size()) ? working_signal[idx] * window[i] : static_cast<T>(0.0);
         }
 
-        fftw_execute(plan);
+        Traits::execute(plan);
         for (int k = 0; k < frame_size / 2 + 1; ++k) {
-            stft_result[f][k] = Complex(out[k][0], out[k][1]);
+            stft_result[f][k] = complex<T>(out[k][0], out[k][1]);
         }
     }
 
-    fftw_destroy_plan(plan);
-    fftw_free(in);
-    fftw_free(out);
+    Traits::destroy_plan(plan);
+    Traits::free(in);
+    Traits::free(out);
     return stft_result;
 }
 
-// Inverse STFT: analog of scipy.signal.istft
-vector<double> STFT_inverse(const vector<vector<Complex>>& stft_result, int frame_size, int hop_size, int original_length) {
-    int n_frames = stft_result.size();
-    int signal_length = (n_frames - 1) * hop_size + frame_size;
-    vector<double> output(signal_length, 0.0);
-    vector<double> window = hann_window(frame_size);
-    vector<double> norm(signal_length, 0.0);
+// Шаблонная функция STFT_inverse
+template<typename T>
+vector<T> STFT_inverse(const vector<vector<complex<T>>>& stft_result, int frame_size, int hop_size, int original_length) {
+    if (stft_result.empty()) return {};
 
-    fftw_plan plan;
-    fftw_complex* in = fftw_alloc_complex(frame_size / 2 + 1);
-    double* out = fftw_alloc_real(frame_size);
-    plan = fftw_plan_dft_c2r_1d(frame_size, in, out, FFTW_MEASURE);
+    using Traits = FFTW_Traits<T>;
+    
+    int n_frames = stft_result.size();
+    int n_freqs = frame_size / 2 + 1;
+    int signal_length = (n_frames - 1) * hop_size + frame_size;
+
+    vector<T> output(signal_length, static_cast<T>(0.0));
+    vector<T> window_sums(signal_length, static_cast<T>(0.0));
+    vector<T> window = hann_window<T>(frame_size);
+
+    typename Traits::complex_type* in = Traits::alloc_complex(n_freqs);
+    typename Traits::real_type* out = Traits::alloc_real(frame_size);
+    typename Traits::plan_type plan = Traits::plan_dft_c2r_1d(frame_size, in, out, FFTW_ESTIMATE);
 
     for (int f = 0; f < n_frames; ++f) {
-        for (int k = 0; k < frame_size / 2 + 1; ++k) {
+        for (int k = 0; k < n_freqs; ++k) {
             in[k][0] = stft_result[f][k].real();
             in[k][1] = stft_result[f][k].imag();
         }
 
-        fftw_execute(plan);
+        Traits::execute(plan);
 
-        for (int i = 0; i < frame_size; ++i) {
-            double w = window[i];
-            int idx = f * hop_size + i;
-            if (idx < signal_length) {
-                // FFTW returns result multiplied by frame_size
-                output[idx] += (out[i] / frame_size) * w;
-                norm[idx] += w * w;
-            }
-        }
-    }
-
-    // Normalization as in scipy
-    for (int i = 0; i < signal_length; ++i) {
-        if (norm[i] > 1e-8) {
-            output[i] /= norm[i];
-        }
-    }
-
-    fftw_destroy_plan(plan);
-    fftw_free(in);
-    fftw_free(out);
-
-    // Обрезаем до оригинального размера, как в Python версии
-    if (original_length > 0 && original_length < output.size()) {
-        output.resize(original_length);
-    }
-
-    return output;
-}
-
-std::vector<float> hann_window_float(int N) {
-    vector<float> w(N);
-    for (int i = 0; i < N; ++i)
-        w[i] = 0.5f * (1.0f - cosf(2.0f * M_PI * i / N));
-    return w;
-}
-
-std::vector<std::vector<ComplexF>> STFT_forward_float(const std::vector<float>& signal, int frame_size, int hop_size) {
-    // Add padding as in scipy.signal.stft with boundary='zeros' and padded=True
-    // scipy adds padding to get an integer number of frames
-    int n_frames = 1 + (signal.size() - frame_size + hop_size - 1) / hop_size;
-    int padded_size = (n_frames - 1) * hop_size + frame_size;
-    vector<vector<ComplexF>> stft_result(n_frames, vector<ComplexF>(frame_size / 2 + 1));
-
-    vector<float> window = hann_window_float(frame_size);
-
-    float* in = fftwf_alloc_real(frame_size);
-    fftwf_complex* out = fftwf_alloc_complex(frame_size / 2 + 1);
-    auto plan = fftwf_plan_dft_r2c_1d(frame_size, in, out, FFTW_MEASURE);
-
-    for (int f = 0; f < n_frames; ++f) {
         int offset = f * hop_size;
         for (int i = 0; i < frame_size; ++i) {
-            int signal_idx = offset + i;
-            if (signal_idx < signal.size()) {
-                in[i] = signal[signal_idx] * window[i];
-            } else {
-                in[i] = 0.0f;  // zero-padding
-            }
-        }
-
-        fftwf_execute(plan);
-        for (int k = 0; k < frame_size / 2 + 1; ++k)
-            stft_result[f][k] = ComplexF(out[k][0], out[k][1]);
-    }
-
-    fftwf_destroy_plan(plan);
-    fftwf_free(in);
-    fftwf_free(out);
-    return stft_result;
-}
-
-std::vector<float> STFT_inverse_float(
-    const std::vector<std::vector<ComplexF>>& stft_result,
-    int frame_size,
-    int hop_size,
-    int original_length
-) {
-    int n_frames = stft_result.size();
-    int signal_length = (n_frames - 1) * hop_size + frame_size;
-    std::vector<float> output(signal_length, 0.0f);
-    std::vector<float> window = hann_window_float(frame_size);
-    std::vector<float> norm(signal_length, 0.0f);
-
-    fftwf_complex* in = fftwf_alloc_complex(frame_size / 2 + 1);
-    float* out = fftwf_alloc_real(frame_size);
-    auto plan = fftwf_plan_dft_c2r_1d(frame_size, in, out, FFTW_MEASURE);
-
-    for (int f = 0; f < n_frames; ++f) {
-        for (int k = 0; k < frame_size / 2 + 1; ++k) {
-            in[k][0] = stft_result[f][k].real();
-            in[k][1] = stft_result[f][k].imag();
-        }
-
-        fftwf_execute(plan);
-
-        for (int i = 0; i < frame_size; ++i) {
-            float w = window[i];
-            int idx = f * hop_size + i;
-            if (idx < signal_length) {
-                // FFTW returns result multiplied by frame_size
-                output[idx] += (out[i] / frame_size) * w;
-                norm[idx] += w * w;
+            if (offset + i < signal_length) {
+                output[offset + i] += (out[i] / frame_size) * window[i];
+                window_sums[offset + i] += window[i] * window[i];
             }
         }
     }
 
-    // Normalization as in scipy
-    for (int i = 0; i < signal_length; ++i) {
-        if (norm[i] > 1e-8f) {
-            output[i] /= norm[i];
+    Traits::destroy_plan(plan);
+    Traits::free(in);
+    Traits::free(out);
+
+    for (size_t i = 0; i < output.size(); ++i) {
+        if (window_sums[i] > static_cast<T>(1e-9)) {
+            output[i] /= window_sums[i];
         }
     }
-
-    fftwf_destroy_plan(plan);
-    fftwf_free(in);
-    fftwf_free(out);
-
-    // Trim to original size, as in Python version
-    if (original_length > 0 && original_length < output.size()) {
-        output.resize(original_length);
+    
+    int pad_size = frame_size / 2;
+    if (original_length > 0 && output.size() >= original_length + pad_size) {
+        vector<T> final_signal(original_length);
+        for(int i = 0; i < original_length; ++i) {
+            final_signal[i] = output[pad_size + i];
+        }
+        return final_signal;
+    } else {
+        if (original_length > 0 && original_length < output.size()) {
+            output.resize(original_length);
+        }
+        return output;
     }
-
-    return output;
 }
-
-

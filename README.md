@@ -1,108 +1,92 @@
-# STFT Library
+# STFT/ISTFT Implementation Comparison
 
-A C++ implementation of Short-Time Fourier Transform (STFT) and Inverse STFT with Python comparison utilities.
+This project compares C++ and Python implementations of Short-Time Fourier Transform (STFT) and Inverse STFT (ISTFT) with identical parameters to ensure mathematical equivalence.
 
-## Overview
+## Files
 
-This library provides efficient C++ implementations of STFT and ISTFT algorithms using FFTW3, with full compatibility to scipy.signal.stft/istft behavior. The implementation supports both single-precision (float) and double-precision (double) data types.
+- `cpp_stft.cpp` - C++ implementation using FFTW library
+- `py_stft.py` - Python implementation using SciPy
+- `stft.hpp` / `stft.cpp` - C++ STFT/ISTFT functions
+- `compare_results.py` - Script to compare C++ and Python results
+- `compile.sh` - Compilation script for C++ code
+- `data/input.bin` - Input seismic data (220 traces × 501 samples)
 
-## Features
+## Parameters
 
-- **STFT Forward Transform**: Converts time-domain signals to time-frequency representation
-- **STFT Inverse Transform**: Reconstructs time-domain signals from time-frequency data
-- **Hann Window**: Built-in Hann window function for spectral analysis
-- **Padding Support**: Automatic zero-padding for boundary handling
-- **FFTW3 Integration**: High-performance FFT using FFTW3 library
-- **Python Comparison**: Utilities to compare C++ results with scipy.signal
-
-## Files Description
-
-### Core Library Files
-
-- **`stft.hpp`** - Header file containing function declarations and type definitions
-- **`stft.cpp`** - Implementation of STFT/ISTFT algorithms for both float and double precision
-
-### Main Applications
-
-- **`cpp_stft.cpp`** - Main C++ application that processes seismic data using STFT/ISTFT
-  - Reads binary seismic data (220 traces × 501 samples)
-  - Applies STFT to each trace with configurable parameters
-  - Performs inverse STFT reconstruction
-  - Saves reconstructed data to binary file
-  - Outputs time and frequency axis information
-
-- **`py_stft.py`** - Python reference implementation using scipy.signal
-  - Demonstrates equivalent functionality using scipy.signal.stft/istft
-  - Serves as a reference for correct behavior
-  - Used for validation and comparison with C++ implementation
-
-- **`compare.py`** - Visualization and comparison utility
-  - Loads original, C++ reconstructed, and Python reconstructed data
-  - Creates side-by-side comparison plots
-  - Uses common color scale for fair comparison
-  - Helps identify any discrepancies between implementations
-
-### Build and Utility Files
-
-- **`compile.sh`** - Compilation script for C++ implementation
-- **`data/`** - Directory containing input/output binary files
+Both implementations use identical parameters:
+- **Frame size**: 64 samples
+- **Hop size**: 32 samples  
+- **Window**: Hann window
+- **Boundary**: Even-symmetric padding
+- **Sampling rate**: 250 Hz (dt = 0.004s)
 
 ## Usage
 
-### Compilation
-
+### 1. Compile and run C++ version
 ```bash
 ./compile.sh
-```
-
-### Running C++ Implementation
-
-```bash
 ./cpp_stft
 ```
 
-### Running Python Implementation
-
+### 2. Run Python version
 ```bash
 python py_stft.py
 ```
 
-### Comparing Results
-
+### 3. Compare results
 ```bash
-python compare.py
+python compare_results.py
 ```
 
-## Parameters
+## Output Files
 
-The library uses the following default parameters:
-- **Frame Size**: 64 samples
-- **Hop Size**: 32 samples (50% overlap)
-- **Window**: Hann window
-- **Padding**: Zero-padding with boundary='zeros' and padded=True
-- **Data**: 220 traces × 501 samples each
+- `data/stft_cpp.bin` - C++ STFT frames (complex data)
+- `data/stft_py.bin` - Python STFT frames (complex data)
+- `data/output_cpp.bin` - C++ reconstructed signal
+- `data/output_py.bin` - Python reconstructed signal
 
-## Algorithm Details
+## Analysis
 
-### STFT Forward Transform
-1. Applies Hann window to signal frames
-2. Performs FFT on each frame
-3. Returns one-sided spectrum (positive frequencies only)
-4. Handles zero-padding for boundary conditions
+Both programs provide comprehensive analysis:
 
-### STFT Inverse Transform
-1. Performs inverse FFT on each time-frequency frame
-2. Applies Hann window to reconstructed frames
-3. Overlap-add reconstruction with proper normalization
-4. Trims result to original signal length
+### STFT Spectrum Analysis
+- Magnitude statistics (min, max, mean)
+- Phase statistics (min, max, mean)
+- Total number of samples
 
-### Normalization
-The implementation correctly handles FFTW scaling and window overlap normalization to ensure perfect reconstruction (within numerical precision).
+### Reconstructed Signal Analysis  
+- Signal statistics (min, max, mean)
+- Total number of samples
+
+### Reconstruction Quality Analysis
+- Max/mean/RMS differences between original and reconstructed
+- Relative error percentage
+
+## Expected Results
+
+With properly aligned implementations:
+- **STFT magnitudes**: Should match to machine precision
+- **STFT phases**: May have small differences due to numerical precision
+- **Reconstructed signals**: Should match to machine precision
+- **Reconstruction quality**: Should show minimal error (< 1e-10)
 
 ## Dependencies
 
-- **C++**: FFTW3 library
-- **Python**: numpy, scipy, matplotlib
+### C++
+- FFTW3 library
+- C++11 or later
+
+### Python  
+- NumPy
+- SciPy
+- Matplotlib (optional, for plotting)
+
+## Notes
+
+- Both implementations use `boundary='even'` for consistent padding
+- C++ uses FFTW for FFT calculations
+- Python uses SciPy's optimized STFT/ISTFT functions
+- Binary file formats are compatible between C++ and Python
 
 
 
