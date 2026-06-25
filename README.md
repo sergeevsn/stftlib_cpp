@@ -4,8 +4,9 @@ A C++ header-only library for Short-Time Fourier Transform (STFT) and inverse ST
 
 ## Features
 
-- **Header-only**: Just include `stft.hpp` in your project
-- **FFTW Integration**: Uses FFTW library for high-performance FFT operations
+- **Header-only STFT logic**: Just include `stft.hpp` in your project
+- **KFR FFT backend**: Uses [KFR](https://kfr.dev) for high-performance SIMD-optimized FFT
+- **Reusable processor**: `StftProcessor` reuses FFT plan and buffers across frames/traces
 - **Template-based**: Supports both `float` and `double` precision
 - **Boundary Handling**: Supports zero-padding and even extension boundary conditions
 - **Perfect Reconstruction**: Implements overlap-add method for perfect signal reconstruction
@@ -13,25 +14,41 @@ A C++ header-only library for Short-Time Fourier Transform (STFT) and inverse ST
 
 ## Dependencies
 
-- **FFTW3**: Fast Fourier Transform library
-- **C++11** or later
+- **[KFR](https://github.com/kfrlib/kfr) 6.2.0**: Fast C++ DSP framework (DFT module)
+- **GCC 11+** or Clang 16+
+- **C++17**
 - **Standard Library**: `<vector>`, `<complex>`, `<cmath>`, `<stdexcept>`, `<numeric>`
 
 ## Installation
 
-1. Install FFTW3:
+1. Clone the repository with submodules (KFR 6.2.0 is pinned in `.gitmodules`):
    ```bash
-   # Ubuntu/Debian
-   sudo apt-get install libfftw3-dev
-   
-   # macOS
-   brew install fftw
-   
-   # Windows (with vcpkg)
-   vcpkg install fftw3
+   git clone --recurse-submodules <repository-url>
+   cd stft
+   ```
+   If the repo is already cloned without submodules:
+   ```bash
+   git submodule update --init kfr
    ```
 
-2. Include the header in your project:
+2. Build and compile:
+   ```bash
+   ./compile.sh
+   ```
+   `compile.sh` initializes the submodule if needed and builds KFR when `kfr/build/lib/libkfr_dft.a` is missing.
+
+   Manual KFR build:
+   ```bash
+   cd kfr
+   cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++ \
+     -DENABLE_TESTS=OFF -DENABLE_EXAMPLES=OFF \
+     -DKFR_ENABLE_DFT=ON -DKFR_ENABLE_MULTIARCH=OFF
+   cmake --build build -j$(nproc)
+   cd ..
+   ./compile.sh
+   ```
+
+3. Include the header in your project:
    ```cpp
    #include "stft.hpp"
    ```
@@ -47,7 +64,21 @@ enum class BoundaryType {
 };
 ```
 
-### Main Functions
+### Main Classes and Functions
+
+#### StftProcessor (recommended for batch processing)
+
+```cpp
+template<typename T>
+class StftProcessor {
+public:
+    StftProcessor(int frame_size, int hop_size, BoundaryType boundary = BoundaryType::ZERO);
+    std::vector<std::vector<std::complex<T>>> forward(const std::vector<T>& signal);
+    std::vector<T> inverse(const std::vector<std::vector<std::complex<T>>>& stft_result, int original_length);
+};
+```
+
+Reuses a single `kfr::dft_plan_real` and scratch buffers across all frames — use one instance per trace batch.
 
 #### STFT Forward Transform
 
@@ -128,8 +159,8 @@ This repository includes test programs to validate the library functionality and
 Demonstrates basic STFT usage and validates perfect reconstruction:
 
 ```bash
-# Compile
-g++ -O3 -std=c++11 cpp_stft.cpp -lfftw3 -lfftw3f -o cpp_stft
+# Compile (builds KFR first if needed — see Installation)
+./compile.sh
 
 # Run
 ./cpp_stft
@@ -258,8 +289,9 @@ int main() {
 
 ## Performance Considerations
 
-- **FFTW Planning**: The library uses `FFTW_ESTIMATE` for plan creation. For repeated operations with the same parameters, consider pre-planning FFTW operations.
-- **Memory Allocation**: FFTW memory is allocated/deallocated for each function call. For high-performance applications, consider reusing FFTW buffers.
+- **FFT plan reuse**: Use `StftProcessor` when processing multiple traces or repeated transforms with the same parameters.
+- **KFR 6.2.0 single-arch**: `KFR_ENABLE_MULTIARCH=OFF` — one `libkfr_dft.a`, no runtime dispatch, builds cleanly with GCC.
+- **Compiler**: GCC 11+ works out of the box (same setup as traceflow). KFR 7+ may require Clang.
 - **Template Instantiation**: The library supports both `float` and `double` precision. Choose based on your accuracy requirements.
 
 ## Mathematical Details
@@ -284,7 +316,7 @@ Where:
 
 ## License
 
-This library is provided as-is for educational and research purposes. Please ensure compliance with FFTW license when using this library.
+This library is provided as-is for educational and research purposes. KFR is distributed under GPLv2/v3 (commercial license available from [kfr.dev](https://kfr.dev)).
 
 ## Contributing
 

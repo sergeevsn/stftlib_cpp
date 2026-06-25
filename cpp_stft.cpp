@@ -89,10 +89,12 @@ int main() {
     std::cout << "Read seismogram: " << seismogram.size() << " traces, " << seismogram[0].size() << " samples each\n";
     std::cout << "Using boundary type: " << (boundary_type == BoundaryType::ZERO ? "ZERO" : "EVEN") << "\n";
 
+    StftProcessor<RealType> processor(frame_size, hop_size, boundary_type);
+
     // Forward STFT
     std::vector<std::vector<std::vector<std::complex<RealType>>>> stft_data(n_traces);
     for (int i = 0; i < n_traces; ++i) {
-        stft_data[i] = STFT_forward<RealType>(seismogram[i], frame_size, hop_size, boundary_type);
+        stft_data[i] = processor.forward(seismogram[i]);
     }
 
     write_stft_binary_file<RealType>(stft_output_file, stft_data);
@@ -101,7 +103,7 @@ int main() {
     // Inverse STFT
     std::vector<std::vector<RealType>> reconstructed(n_traces);
     for (int i = 0; i < n_traces; ++i) {
-        reconstructed[i] = STFT_inverse<RealType>(stft_data[i], frame_size, hop_size, n_samples, boundary_type);
+        reconstructed[i] = processor.inverse(stft_data[i], n_samples);
     }
 
     write_binary_file<RealType>(output_file, reconstructed);
